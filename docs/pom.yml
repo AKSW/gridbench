@@ -1,0 +1,28 @@
+modelVersion: 4.0.0
+groupId: org.aksw.deleteme
+artifactId: gridbench-data
+version: 0.0.1-SNAPSHOT
+name: 'Package a directory in YAML'
+
+parent:
+  groupId: org.aksw.data.config
+  artifactId: aksw-data-deployment
+  version: 0.0.9-SNAPSHOT
+
+properties:
+  gridbench-maven-plugin.version: 0.0.1-SNAPSHOT
+  project.build.sourceEncoding: UTF-8
+  
+build:
+  plugins:
+    - groupId: org.aksw.gridbench
+      artifactId: gridbench-maven-plugin
+      version: ${gridbench-maven-plugin.version}
+      executions:
+        - id: datagen
+          goals: [ data ]
+        - id: qurrygen
+          goals: [ query ]
+
+
+
