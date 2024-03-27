@@ -10,19 +10,184 @@ parent:
   version: 0.0.9-SNAPSHOT
 
 properties:
+  queriesFile: ${project.build.directory}/queries.rq
+  lsqFile: ${project.build.directory}/queries.trig
+  dataFile: ${project.build.directory}/data.nq
+  tdb2Dir: ${project.build.directory}/tdb2
+  fusekiAssemblerFile: ${project.build.directory}/assembler.ttl
+  docker.showLogs: true  
+  timeout: 1800000
+  
+  maven-antrun-plugin.version: 3.0.0
   gridbench-maven-plugin.version: 0.0.1-SNAPSHOT
+  tdb2-maven-plugin.version: 0.0.1-SNAPSHOT
+  lsq-maven-plugin.version: 0.0.1-SNAPSHOT
   project.build.sourceEncoding: UTF-8
   
+  fusekiConfig: |
+    PREFIX fuseki:    <http://jena.apache.org/fuseki#>
+    PREFIX rdf:       <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+    PREFIX rdfs:      <http://www.w3.org/2000/01/rdf-schema#>
+    PREFIX owl:       <http://www.w3.org/2002/07/owl#>
+    PREFIX tdb1:      <http://jena.hpl.hp.com/2008/tdb#>
+    PREFIX tdb2:      <http://jena.apache.org/2016/tdb#>
+    PREFIX text:      <http://jena.apache.org/text#> 
+    PREFIX ja:        <http://jena.hpl.hp.com/2005/11/Assembler#>
+    PREFIX geosparql: <http://jena.apache.org/geosparql#>
+    
+    PREFIX fe:        <http://jena.apache.org/from-enhancer#>
+    PREFIX se:        <http://jena.apache.org/service-enhancer#>
+    PREFIX xdt:       <http://jsa.aksw.org/dt/sparql/>
+    
+    PREFIX jxp:       <http://jenax.aksw.org/plugin#>
+    
+    <#service> rdf:type fuseki:Service ;
+        fuseki:name "ds" ;
+        fuseki:endpoint [ fuseki:name "update" ; fuseki:operation fuseki:update ; ] ;
+        fuseki:endpoint [ fuseki:name "update" ; fuseki:operation fuseki:query ; ] ;
+        fuseki:endpoint [ fuseki:name "data" ; fuseki:operation fuseki:gsp-rw ; ] ;
+        fuseki:endpoint [ fuseki:name "analytics" ; fuseki:operation fuseki:query ;
+                          ja:context [ ja:cxtName "arq:queryTimeout" ;  ja:cxtValue "2880000" ] ; ] ;
+        fuseki:endpoint [ fuseki:name "query" ; fuseki:operation fuseki:query ; ] ;
+        fuseki:endpoint [ fuseki:operation fuseki:query ; ] ;
+        fuseki:dataset <#quadsDS> .
+    
+    <#quadsDS> rdf:type ja:DatasetQuads ;
+        ja:dataset <#geoDS> ;
+        .
+    
+    <#geoDS> rdf:type geosparql:GeosparqlDataset ;
+        ## If absent build an in-memory index each time.
+        geosparql:spatialIndexFile     "/data/run/databases/tdb2/spatial.index";
+    
+        ## Default settings. See documentation for meanings.
+        geosparql:inference            false ;
+        geosparql:queryRewrite         true ;
+        geosparql:indexEnabled         true ;
+        geosparql:applyDefaultGeometry false ;
+    
+        # graph based index
+        geosparql:spatialIndexPerGraph true ;
+       
+        # SRS URI
+        geosparql:srsUri "http://www.opengis.net/def/crs/EPSG/0/4326" ;
+
+        # 3 item lists: [Geometry Literal, Geometry Transform, Query Rewrite]
+        geosparql:indexSizes           "-1,-1,-1" ;       # Default - unlimited.
+        geosparql:indexExpires         "5000,5000,5000" ; # Default - time in milliseconds.
+   
+        ## Required - data over which GeoSPARQL is applied.
+        geosparql:dataset <#baseDS> ;
+        .
+
+    <#baseDS> rdf:type tdb2:DatasetTDB2 ;
+        tdb2:location "/data/run/databases/tdb2" ;
+        #tdb2:unionDefaultGraph true ;
+        tdb2:unionDefaultGraph false ;
+        .
+
 build:
   plugins:
+    # Generate the benchmark data and queries
     - groupId: org.aksw.gridbench
       artifactId: gridbench-maven-plugin
       version: ${gridbench-maven-plugin.version}
       executions:
         - id: datagen
           goals: [ data ]
-        - id: qurrygen
+          configuration:
+            outputFile: ${dataFile}
+        - id: querygen
           goals: [ query ]
+          configuration:
+            outputFile: ${queriesFile}
+
+    # Write the fuseki config to a file that we can bind mount into the docker container
+    - groupId: org.codehaus.gmaven
+      artifactId: groovy-maven-plugin
+      version: 2.1.1
+      executions:
+        - id: write-config
+          goals: [ execute ]
+          phase: validate
+          configuration:
+            # TODO Replace with a plugin that can write a file directly
+            source: |
+              import java.nio.file.Path;
+              import java.nio.file.Files;
+              Path path = Path.of("${fusekiAssemblerFile}");
+              Files.createDirectories(path.getParent());
+              file = path.toFile();
+              file.text = """${fusekiConfig}"""
+
+    # Create a TDB2 database
+    - groupId: org.aksw.maven.plugins
+      artifactId: tdb2-maven-plugin
+      version: ${tdb2-maven-plugin.version}
+      executions:
+        - id: load-data
+          goals: [ load ]
+          phase: generate-resources # by default runs in 'package' phase
+          # TODO Specify the input file
+          configuration:
+            outputFolder: ${tdb2Dir}
+            createArchive: false # Don't package the TDB2 folder as an archive
+            files:
+              - file: ${dataFile}              
+
+    # Start a docker container and bind mount the config and database file
+    - groupId: io.fabric8
+      artifactId: docker-maven-plugin
+      configuration:
+        images:
+        - alias: myservice
+          # name: aksw/fuseki-geoplus:5.0.0-1
+          name: test-fuseki
+          build:
+            from: aksw/fuseki-geoplus:5.0.0-1
+            healthCheck:
+              interval: 1s
+              retries: 180
+              cmd: curl http://localhost:3030/ds/query --data-urlencode 'query=SELECT * { ?s a <http://www.example.org/Thing> } LIMIT 1'
+          run:
+            wait: {time: '${timeout}', healthy: true}
+            ports:
+              - "3032:3030"
+            volumes:
+              bind: !!pairs
+                # The keys are ignored; they are just needed in order for the YAML polyglot plugin to accept the config
+                - b1: "${tdb2Dir}:/data/run/databases/tdb2"
+                - b2: "${fusekiAssemblerFile}:/data/run/configuration/assembler.ttl"
+      executions:
+      - id: start-docker
+        goals: [ build, start ]
+        # id: run-container
+        phase: compile # process-resources
+      - id: stop-docker
+        goals: [ stop ]
+        phase: verify
+
+    - groupId: org.aksw.maven.plugins
+      artifactId: lsq-maven-plugin
+      version: ${lsq-maven-plugin.version}
+      executions:
+        - id: rdfize
+          goals: [ "rdfize" ]
+          phase: process-resources
+          configuration:
+            logFile: ${queriesFile}
+            logFormat: sparql # Due to a bug in lsq's probing code this is needed
+            enrichers: [ bbox ]
+            outputFile: ${lsqFile}
+        - id: benchmark
+          goals: [ benchmark ]
+          phase: package
+          configuration:
+            logFile: ${lsqFile}
+            serviceUrl: http://localhost:3032/ds/query
+            baseIri: http://lsq.aksw.org/
+            dataset: geobench
+            outputFile: ${project.build.directory}/bench.trig
 
 
 

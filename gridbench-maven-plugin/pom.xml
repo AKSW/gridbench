@@ -61,7 +61,22 @@
 					<release>${maven.compiler.release}</release>
 				</configuration>
 			</plugin>
-
+ <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-plugin-plugin</artifactId>
+            <version>3.11.0</version> <!-- Use the latest version available -->
+            <executions>
+                <execution>
+                    <id>mojo-descriptions</id>
+                    <goals>
+                        <goal>helpmojo</goal>
+                    </goals>
+                </execution>
+            </executions>
+            <configuration>
+                <!-- Additional configurations can go here -->
+            </configuration>
+        </plugin>
 		</plugins>
 	</build>
 	
