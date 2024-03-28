@@ -1,0 +1,18 @@
+modelVersion: 4.0.0
+groupId: org.aksw.eval.gridbench.jena
+artifactId: eval-vanilla-ng-all
+description: Spatial Indexing Experiment union graph
+# packaging: pom
+
+parent:
+  groupId: org.aksw.eval.gridbench.jena
+  artifactId: eval-template
+  version: 0.0.1-SNAPSHOT
+
+properties:
+  bench.exec.skip: 'false'
+  dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
+  spatialIndexFilename: "vanilla.spatial.index"
+  singleGraph: false
+  unionDefaultGraph: false
+

@@ -1,0 +1,18 @@
+modelVersion: 4.0.0
+groupId: org.aksw.eval.gridbench.jena
+artifactId: eval-parent
+packaging: pom
+
+parent:
+  groupId: org.aksw.data.config
+  artifactId: aksw-data-deployment
+  version: 0.0.9-SNAPSHOT
+
+modules:
+  - eval-geoplus-ng-all
+  - eval-geoplus-ng-one
+  - eval-geoplus-ug
+  - eval-vanilla-ng-all
+  - eval-vanilla-ng-one
+  - eval-vanilla-ug
+
