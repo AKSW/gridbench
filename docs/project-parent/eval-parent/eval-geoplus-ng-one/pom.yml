@@ -13,6 +13,7 @@ properties:
   bench.exec.skip: 'false'
   dockerImageName: "aksw/fuseki-geoplus:5.0.0-1"
   spatialIndexFilename: "geoplus.spatial.index"
-  singleGraph: true
+  allGraphs: false
   unionDefaultGraph: false
+  queriesTag: '-ng-one'
 

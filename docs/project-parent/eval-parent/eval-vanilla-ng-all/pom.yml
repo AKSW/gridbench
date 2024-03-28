@@ -13,6 +13,7 @@ properties:
   bench.exec.skip: 'false'
   dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
   spatialIndexFilename: "vanilla.spatial.index"
-  singleGraph: false
+  allGraphs: true
   unionDefaultGraph: false
+  queriesTag: '-ng-all'
 

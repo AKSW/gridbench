@@ -23,21 +23,23 @@ properties:
   grid.query.cols: 16
   grid.graphs: 16
   grid.scale: true
+  jvmArgs: -Xmx48G
   unionDefaultGraph: false
   dockerImageName: aksw/fuseki-vanilla:5.0.0-1
   # queriesFile: ${project.build.directory}/queries.rq
   # lsqFile: ${project.build.directory}/queries.trig
   # dataFile: ${project.build.directory}/data.nq  
   # tdb2Dir: ${project.build.directory}/tdb2
-  queriesFile: ${java.io.tmpdir}/gridbench/queries.rq
-  lsqFile: ${java.io.tmpdir}/gridbench/queries.trig
+  queriesTag: ''
+  allGraphs: false
+  queriesFile: ${java.io.tmpdir}/gridbench/queries${queriesTag}.rq
+  lsqFile: ${java.io.tmpdir}/gridbench/queries${queriesTag}.trig
   dataFile: ${java.io.tmpdir}/gridbench/data.nq  
   tdb2Dir: ${java.io.tmpdir}/gridbench/tdb2
   fusekiAssemblerFile: ${project.build.directory}/assembler.ttl
   docker.showLogs: true  
   timeout: 1800000
   
-  unionDefaultGraphMode: false # Override in children
   spatialIndexFilename: spatial.index
   
   maven-antrun-plugin.version: 3.0.0
@@ -61,11 +63,13 @@ properties:
                           ja:context [ ja:cxtName "arq:queryTimeout" ;  ja:cxtValue "2880000" ] ; ] ;
         fuseki:endpoint [ fuseki:name "query" ; fuseki:operation fuseki:query ; ] ;
         fuseki:endpoint [ fuseki:operation fuseki:query ; ] ;
-        fuseki:dataset <#quadsDS> .
-    
-    <#quadsDS> a ja:DatasetQuads ;
-        ja:dataset <#geoDS> ;
+        fuseki:dataset <#geoDS> ;
+    #    fuseki:dataset <#quadsDS> .
         .
+    
+    #<#quadsDS> a ja:DatasetQuads ;
+    #    ja:dataset <#geoDS> ;
+    #    .
     
     <#geoDS> a geosparql:GeosparqlDataset ;
         ## If absent build an in-memory index each time.
@@ -95,7 +99,6 @@ properties:
         tdb2:location "/data/run/databases/tdb2" ;
         tdb2:unionDefaultGraph ${unionDefaultGraph} ;
         .
-
 
 build:
   plugins:
@@ -137,6 +140,7 @@ build:
             scale: ${grid.scale}
             rows: ${grid.data.rows}
             cols: ${grid.data.cols}
+            allGraphs: ${allGraphs}
             unionDefaultGraph: ${unionDefaultGraph}
             outputFile: ${dataFile}
         - id: querygen
@@ -152,11 +156,12 @@ build:
             graphs: ${grid.graphs}
             scale: ${grid.scale}
             rows: ${grid.query.rows}
-            cols: ${gridq.query.cols}
+            cols: ${grid.query.cols}
+            allGraphs: ${allGraphs}
             unionDefaultGraph: ${unionDefaultGraph}
             outputFile: ${queriesFile}
 
-    # Create a TDB2 database
+    # Create a TDB2 database directory from the datasat
     - groupId: org.aksw.maven.plugins
       artifactId: tdb2-maven-plugin
       version: ${tdb2-maven-plugin.version}
@@ -172,7 +177,7 @@ build:
             files:
               - file: ${dataFile}              
 
-    # Start a docker container and bind mount the config and database file
+    # Start a docker container and bind mount the config and database directory
     - groupId: io.fabric8
       artifactId: docker-maven-plugin
       configuration:
@@ -192,7 +197,7 @@ build:
               timeout: 10s
           run:
             env:
-              JVM_ARGS: -Xmx48G
+              JVM_ARGS: ${jvmArgs}
               # -XX:ReplayDataFile=/data/coypu/tools/log/fuseki_replay_pid%p.log -XX:ErrorFile=/data/coypu/tools/log/fuseki_hs_err_pid%p.log -Dderby.stream.error.file=/data/coypu/tools/log/fuseki_derby.log
             wait:
               time: '${timeout}'
@@ -240,56 +245,4 @@ build:
             dataset: geobench
             outputFile: ${project.build.directory}/bench.trig
 
-
-#profiles:
-#  - id: vanilla-ng-one
-#    properties:
-#      dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
-#      spatialIndexFilename: "vanilla.spatial.index"
-#      singleGraph: true
-#      unionDefaultGraph: false
-
-#  - id: vanilla-ng-all
-#    properties:
-#      dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
-#      spatialIndexFilename: "vanilla.spatial.index"
-#      unionDefaultGraph: false
-#      singleGraph: false
-
-#  - id: vanilla-ug-all
-#    properties:
-#      dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
-#      spatialIndexFilename: "vanilla.spatial.index"
-#      unionDefaultGraph: true
-#      singleGraph: false
-
-#  - id: geoplus-ng-one
-#    properties:
-#      dockerImageName: "aksw/fuseki-geoplus:5.0.0-1"
-#      spatialIndexFilename: "geoplus.spatial.index"
-#      singleGraph: true
-#      unionDefaultGraph: false
-
-#  - id: geoplus-ng-all
-#    properties:
-#      dockerImageName: "aksw/fuseki-geoplus:5.0.0-1"
-#      spatialIndexFilename: "geoplus.spatial.index"
-#      unionDefaultGraph: false
-#      singleGraph: false
-
-#  - id: geoplus-ug-all
-#    properties:
-#      dockerImageName: "aksw/fuseki-geoplus:5.0.0-1"
-#      spatialIndexFilename: "geoplus.spatial.index"
-#      unionDefaultGraph: true
-#      singleGraph: false
-
-
-#  - activation:
-#      property:
-#        name: "bench.exec.run"
-#        value: "!false"
-#      property:
-#        name: bench.exec.skip
-#        value: "!true"
 
