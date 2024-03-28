@@ -3,6 +3,7 @@ groupId: org.aksw.eval.gridbench.jena
 artifactId: eval-template
 version: 0.0.1-SNAPSHOT
 name: 'Package a directory in YAML'
+packaging: pom
 
 parent:
   groupId: org.aksw.data.config
@@ -10,6 +11,8 @@ parent:
   version: 0.0.9-SNAPSHOT
 
 properties:
+  # bench.exec.run: false # Set to false in child modules
+  bench.exec.skip: true
   grid.min.x: -90
   grid.max.x: 90
   grid.min.y: -90
@@ -93,185 +96,200 @@ properties:
         tdb2:unionDefaultGraph ${unionDefaultGraph} ;
         .
 
-profiles:
-  - id: vanilla-ng-one
-    properties:
-      dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
-      spatialIndexFilename: "vanilla.spatial.index"
-      singleGraph: true
-      unionDefaultGraph: false
 
-  - id: vanilla-ng-all
-    properties:
-      dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
-      spatialIndexFilename: "vanilla.spatial.index"
-      unionDefaultGraph: false
-      singleGraph: false
-
-  - id: vanilla-ug-all
-    properties:
-      dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
-      spatialIndexFilename: "vanilla.spatial.index"
-      unionDefaultGraph: true
-      singleGraph: false
-
-  - id: geoplus-ng-one
-    properties:
-      dockerImageName: "aksw/fuseki-geoplus:5.0.0-1"
-      spatialIndexFilename: "geoplus.spatial.index"
-      singleGraph: true
-      unionDefaultGraph: false
-
-  - id: geoplus-ng-all
-    properties:
-      dockerImageName: "aksw/fuseki-geoplus:5.0.0-1"
-      spatialIndexFilename: "geoplus.spatial.index"
-      unionDefaultGraph: false
-      singleGraph: false
-
-  - id: geoplus-ug-all
-    properties:
-      dockerImageName: "aksw/fuseki-geoplus:5.0.0-1"
-      spatialIndexFilename: "geoplus.spatial.index"
-      unionDefaultGraph: true
-      singleGraph: false
-
-
-  - activation:
-      property:
-        name: bench.exec.skip
-        value: "!true"
-    build:
-      plugins:
-        # Write the fuseki config to a file that we can bind mount into the docker container
-        - groupId: org.codehaus.gmaven
-          artifactId: groovy-maven-plugin
-          version: 2.1.1
-          executions:
-            - id: write-config
-              goals: [ execute ]
-              phase: validate
-              configuration:
-                # TODO Replace with a plugin that can write a file directly
-                source: |
-                  import java.nio.file.Path;
-                  import java.nio.file.Files;
-                  Path path = Path.of("${fusekiAssemblerFile}");
-                  Files.createDirectories(path.getParent());
-                  file = path.toFile();
-                  file.text = """${fusekiConfig}"""
-      
-        # Generate the benchmark data and queries
-        - groupId: org.aksw.gridbench
-          artifactId: gridbench-maven-plugin
-          version: ${gridbench-maven-plugin.version}
-          executions:
-            - id: datagen
-              goals: [ data ]
-              phase: generate-resources
-              configuration:
-                envelope:
-                  minX: ${grid.min.x}
-                  maxX: ${grid.max.x}
-                  minY: ${grid.min.y}
-                  maxY: ${grid.max.y}
-                graphs: ${grid.graphs}
-                scale: ${grid.scale}
-                rows: ${grid.data.rows}
-                cols: ${grid.data.cols}
-                unionDefaultGraph: ${unionDefaultGraph}
-                outputFile: ${dataFile}
-            - id: querygen
-              goals: [ query ]
-              phase: generate-resources
-              configuration:
-                envelope:
-                  minX: ${grid.min.x}
-                  maxX: ${grid.max.x}
-                  minY: ${grid.min.y}
-                  maxY: ${grid.max.y}
-                graphs: ${grid.graphs}
-                scale: ${grid.scale}
-                rows: ${grid.query.rows}
-                cols: ${gridq.query.cols}
-                unionDefaultGraph: ${unionDefaultGraph}
-                outputFile: ${queriesFile}
-
-        # Create a TDB2 database
-        - groupId: org.aksw.maven.plugins
-          artifactId: tdb2-maven-plugin
-          version: ${tdb2-maven-plugin.version}
-          executions:
-            - id: load-data
-              goals: [ load ]
-              phase: generate-resources # by default runs in 'package' phase
-              # TODO Specify the input file
-              configuration:
-                outputFolder: ${tdb2Dir}
-                createArchive: false # Don't package the TDB2 folder as an archive
-                files:
-                  - file: ${dataFile}              
-
-        # Start a docker container and bind mount the config and database file
-        - groupId: io.fabric8
-          artifactId: docker-maven-plugin
+build:
+  plugins:
+    # Write the fuseki config to a file that we can bind mount into the docker container
+    - groupId: org.codehaus.gmaven
+      artifactId: groovy-maven-plugin
+      version: 2.1.1
+      executions:
+        - id: write-config
+          goals: [ execute ]
+          phase: validate
           configuration:
-            images:
-            - alias: myservice
-              # name: aksw/fuseki-geoplus:5.0.0-1
-              name: test-fuseki
-              build:
-                from: ${dockerImageName}
-                healthCheck:
-                  # cmd: "curl -f http://localhost:3030/ds/query --data-urlencode 'query=SELECT * { ?s a <http://www.example.org/Thing> } LIMIT 1' || exit 1"
-                  cmd: "curl -f 'http://localhost:3030/$/ping' || exit 1"
-                  startPeriod: 30m
-                  interval: 10s
-                  retries: 180
-                  timeout: 10s
-              run:
-                env:
-                  JVM_ARGS: -Xmx48G
-                  # -XX:ReplayDataFile=/data/coypu/tools/log/fuseki_replay_pid%p.log -XX:ErrorFile=/data/coypu/tools/log/fuseki_hs_err_pid%p.log -Dderby.stream.error.file=/data/coypu/tools/log/fuseki_derby.log
-                wait: {time: '${timeout}', healthy: true}
-                # wait: { healthy: true }
-                ports:
-                  - "3032:3030"
-                volumes:
-                  bind: !!pairs
-                    # The keys are ignored; they are just needed in order for the YAML polyglot plugin to accept the config
-                    - b1: "${tdb2Dir}:/data/run/databases/tdb2"
-                    - b2: "${fusekiAssemblerFile}:/data/run/configuration/assembler.ttl"
-          executions:
-          - id: start-docker
-            goals: [ build, start ]
-            # id: run-container
-            phase: generate-resources # process-resources
-          - id: stop-docker
-            goals: [ stop ]
-            phase: compile
+            skipScriptExecution: ${bench.exec.skip}
+            # TODO Replace with a plugin that can write a file directly
+            source: |
+              import java.nio.file.Path;
+              import java.nio.file.Files;
+              Path path = Path.of("${fusekiAssemblerFile}");
+              Files.createDirectories(path.getParent());
+              file = path.toFile();
+              file.text = """${fusekiConfig}"""
+      
+    # Generate the benchmark data and queries
+    - groupId: org.aksw.gridbench
+      artifactId: gridbench-maven-plugin
+      version: ${gridbench-maven-plugin.version}
+      executions:
+        - id: datagen
+          goals: [ data ]
+          phase: generate-resources
+          configuration:
+            skip: ${bench.exec.skip}
+            envelope:
+              minX: ${grid.min.x}
+              maxX: ${grid.max.x}
+              minY: ${grid.min.y}
+              maxY: ${grid.max.y}
+            graphs: ${grid.graphs}
+            scale: ${grid.scale}
+            rows: ${grid.data.rows}
+            cols: ${grid.data.cols}
+            unionDefaultGraph: ${unionDefaultGraph}
+            outputFile: ${dataFile}
+        - id: querygen
+          goals: [ query ]
+          phase: generate-resources
+          configuration:
+            skip: ${bench.exec.skip}
+            envelope:
+              minX: ${grid.min.x}
+              maxX: ${grid.max.x}
+              minY: ${grid.min.y}
+              maxY: ${grid.max.y}
+            graphs: ${grid.graphs}
+            scale: ${grid.scale}
+            rows: ${grid.query.rows}
+            cols: ${gridq.query.cols}
+            unionDefaultGraph: ${unionDefaultGraph}
+            outputFile: ${queriesFile}
 
-        - groupId: org.aksw.maven.plugins
-          artifactId: lsq-maven-plugin
-          version: ${lsq-maven-plugin.version}
-          executions:
-            - id: rdfize
-              goals: [ "rdfize" ]
-              phase: process-resources
-              configuration:
-                logFile: ${queriesFile}
-                logFormat: sparql # Due to a bug in lsq's probing code this is needed
-                enrichers: [ bbox ]
-                outputFile: ${lsqFile}
-            - id: benchmark
-              goals: [ benchmark ]
-              phase: process-resources
-              configuration:
-                logFile: ${lsqFile}
-                serviceUrl: http://localhost:3032/ds/query
-                baseIri: http://lsq.aksw.org/
-                dataset: geobench
-                outputFile: ${project.build.directory}/bench.trig
+    # Create a TDB2 database
+    - groupId: org.aksw.maven.plugins
+      artifactId: tdb2-maven-plugin
+      version: ${tdb2-maven-plugin.version}
+      executions:
+        - id: load-data
+          goals: [ load ]
+          phase: generate-resources # by default runs in 'package' phase
+          # TODO Specify the input file
+          configuration:
+            skip: ${bench.exec.skip}
+            outputFolder: ${tdb2Dir}
+            createArchive: false # Don't package the TDB2 folder as an archive
+            files:
+              - file: ${dataFile}              
+
+    # Start a docker container and bind mount the config and database file
+    - groupId: io.fabric8
+      artifactId: docker-maven-plugin
+      configuration:
+        skip: ${bench.exec.skip}
+        images:
+        - alias: myservice
+          # name: aksw/fuseki-geoplus:5.0.0-1
+          name: test-fuseki
+          build:
+            from: ${dockerImageName}
+            healthCheck:
+              # cmd: "curl -f http://localhost:3030/ds/query --data-urlencode 'query=SELECT * { ?s a <http://www.example.org/Thing> } LIMIT 1' || exit 1"
+              cmd: "curl -f 'http://localhost:3030/$/ping' || exit 1"
+              startPeriod: 30m
+              interval: 10s
+              retries: 180
+              timeout: 10s
+          run:
+            env:
+              JVM_ARGS: -Xmx48G
+              # -XX:ReplayDataFile=/data/coypu/tools/log/fuseki_replay_pid%p.log -XX:ErrorFile=/data/coypu/tools/log/fuseki_hs_err_pid%p.log -Dderby.stream.error.file=/data/coypu/tools/log/fuseki_derby.log
+            wait:
+              time: '${timeout}'
+              healthy: true
+              exec:
+                preStop: rm -f /data/run/databases/tdb2/tdb.lock && rm -f /data/run/databases/tdb2/Data-0001/tdb.lock
+            # wait: { healthy: true }
+            ports:
+              - "3032:3030"
+            volumes:
+              bind: !!pairs
+                # The keys are ignored; they are just needed in order for the YAML polyglot plugin to accept the config
+                - b1: "${tdb2Dir}:/data/run/databases/tdb2"
+                - b2: "${fusekiAssemblerFile}:/data/run/configuration/assembler.ttl"
+      executions:
+      - id: start-docker
+        goals: [ build, start ]
+        # id: run-container
+        phase: generate-resources # process-resources
+      - id: stop-docker
+        goals: [ stop ]
+        phase: compile
+
+    - groupId: org.aksw.maven.plugins
+      artifactId: lsq-maven-plugin
+      version: ${lsq-maven-plugin.version}
+      executions:
+        - id: rdfize
+          goals: [ "rdfize" ]
+          phase: process-resources
+          configuration:
+            skip: ${bench.exec.skip}
+            logFile: ${queriesFile}
+            logFormat: sparql # Due to a bug in lsq's probing code this is needed
+            enrichers: [ bbox ]
+            outputFile: ${lsqFile}
+        - id: benchmark
+          goals: [ benchmark ]
+          phase: process-resources
+          configuration:
+            skip: ${bench.exec.skip}
+            logFile: ${lsqFile}
+            serviceUrl: http://localhost:3032/ds/query
+            baseIri: http://lsq.aksw.org/
+            dataset: geobench
+            outputFile: ${project.build.directory}/bench.trig
 
 
+#profiles:
+#  - id: vanilla-ng-one
+#    properties:
+#      dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
+#      spatialIndexFilename: "vanilla.spatial.index"
+#      singleGraph: true
+#      unionDefaultGraph: false
+
+#  - id: vanilla-ng-all
+#    properties:
+#      dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
+#      spatialIndexFilename: "vanilla.spatial.index"
+#      unionDefaultGraph: false
+#      singleGraph: false
+
+#  - id: vanilla-ug-all
+#    properties:
+#      dockerImageName: "aksw/fuseki-vanilla:5.0.0-1"
+#      spatialIndexFilename: "vanilla.spatial.index"
+#      unionDefaultGraph: true
+#      singleGraph: false
+
+#  - id: geoplus-ng-one
+#    properties:
+#      dockerImageName: "aksw/fuseki-geoplus:5.0.0-1"
+#      spatialIndexFilename: "geoplus.spatial.index"
+#      singleGraph: true
+#      unionDefaultGraph: false
+
+#  - id: geoplus-ng-all
+#    properties:
+#      dockerImageName: "aksw/fuseki-geoplus:5.0.0-1"
+#      spatialIndexFilename: "geoplus.spatial.index"
+#      unionDefaultGraph: false
+#      singleGraph: false
+
+#  - id: geoplus-ug-all
+#    properties:
+#      dockerImageName: "aksw/fuseki-geoplus:5.0.0-1"
+#      spatialIndexFilename: "geoplus.spatial.index"
+#      unionDefaultGraph: true
+#      singleGraph: false
+
+
+#  - activation:
+#      property:
+#        name: "bench.exec.run"
+#        value: "!false"
+#      property:
+#        name: bench.exec.skip
+#        value: "!true"
 
